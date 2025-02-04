@@ -357,9 +357,7 @@ class SyllabusMapWrapper(PettingZooTaskWrapper):
         self.mean_episode_return = 0.0
         seed = kwargs.pop("seed", None)
         new_task = kwargs.pop("new_task", seed)
-        # new_task = 21
         self.task = new_task
-        # print(new_task)
         obs, info = self.env.reset(map_id=new_task, **kwargs)
         if self.eval:
             info["task_completion"] = 0.0

@@ -159,5 +159,5 @@ hybrid:
     donot_attack_dangerous_npc: True
 
 syllabus:
-  use_curriculum: True
+  use_curriculum: False
   method: "learning_progress"
