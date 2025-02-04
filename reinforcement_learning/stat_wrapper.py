@@ -22,6 +22,7 @@ class BaseStatWrapper(BaseParallelWrapper):
         self._reset_episode_stats()
         self._stat_prefix = stat_prefix
         self.use_custom_reward = use_custom_reward
+        self.original_reward = 0
 
     def seed(self, seed):
         self.env.seed(seed)
@@ -47,6 +48,7 @@ class BaseStatWrapper(BaseParallelWrapper):
 
     def reset(self, **kwargs):
         """Called at the start of each episode"""
+        self.original_reward = 0
         self._reset_episode_stats()
         obs, info = self.env.reset(**kwargs)
 
@@ -62,6 +64,7 @@ class BaseStatWrapper(BaseParallelWrapper):
             action[agent_id] = self.action(agent_id, action[agent_id])
 
         obs, rewards, terms, truncs, infos = self.env.step(action)
+        self.original_reward = rewards
 
         # Stop early if there are too few agents generating the training data
         # Also env.agents is empty when the tick reaches the config horizon

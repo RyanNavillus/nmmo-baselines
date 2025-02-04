@@ -21,7 +21,7 @@ def load_from_config(agent, debug=False):
     with open("config.yaml") as f:
         config = yaml.safe_load(f)
     default_keys = (
-        "env train policy recurrent sweep_metadata sweep_metric sweep wandb reward_wrapper".split()
+        "env train policy recurrent sweep_metadata sweep_metric sweep wandb reward_wrapper syllabus".split()
     )
     defaults = {key: config.get(key, {}) for key in default_keys}
 
@@ -183,7 +183,7 @@ if __name__ == "__main__":
     # parser.add_argument(
     #     "--test-curriculum", type=str, default=BASELINE_CURRICULUM, help="Path to curriculum file"
     # )
-    parser.add_argument("--syllabus", action="store_true", help="Use Syllabus for curriculum")
+    # parser.add_argument("--syllabus", action="store_true", help="Use Syllabus for curriculum")
     # parser.add_argument('--baseline', action='store_true', help='Baseline run')
     parser.add_argument(
         "--vectorization",
@@ -207,16 +207,14 @@ if __name__ == "__main__":
     config.policy = {**init_args["policy"], **config.policy}
     config.recurrent = {**init_args["recurrent"], **config.recurrent}
     config.reward_wrapper = {**init_args["reward_wrapper"], **config.reward_wrapper}
-
     # Generate argparse menu from config
     args = combine_config_args(parser, args, config)
-
     # Perform mode-specific updates
     args = update_args(args, mode=args["mode"])
 
     # Make default or syllabus-based env_creator
     syllabus = None
-    if args.syllabus is True:
+    if args.syllabus.use_curriculum is True:
         # NOTE: Setting use_custom_reward to False will ignore the agent's custom reward
         # and only use the env-provided reward from the curriculum tasks
         args.reward_wrapper.use_custom_reward = True

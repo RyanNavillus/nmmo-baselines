@@ -6,7 +6,8 @@ import pufferlib.emulation
 from pettingzoo.utils.wrappers.base_parallel import BaseParallelWrapper
 from syllabus.core import PettingZooSyncWrapper as SyllabusSyncWrapper
 
-from syllabus_wrapper import SyllabusSeedWrapper
+from syllabus.core.evaluator import GymnasiumEvaluationWrapper
+from syllabus_wrapper import SyllabusSeedWrapper, SyllabusMapWrapper
 
 
 class Config(
@@ -48,7 +49,7 @@ class Config(
 
 
 def make_env_creator(
-    reward_wrapper_cls: BaseParallelWrapper, syllabus_wrapper=False, syllabus=None
+    reward_wrapper_cls: BaseParallelWrapper, syllabus_wrapper=False, syllabus=None, eval=False,
 ):
     def env_creator(*args, **kwargs):
         """Create an environment."""
@@ -57,7 +58,11 @@ def make_env_creator(
 
         # Add Syllabus task wrapper
         if syllabus_wrapper or syllabus is not None:
-            env = SyllabusSeedWrapper(env)
+            env = SyllabusMapWrapper(env, eval=eval)
+
+        # Add eval wrapper
+        if eval:
+            env = GymnasiumEvaluationWrapper(env, start_index_spacing=15, randomize_order=False)
 
         # Use syllabus curriculum if provided
         if syllabus is not None:
@@ -68,7 +73,10 @@ def make_env_creator(
                 batch_size=8,
             )
 
-        env = pufferlib.emulation.PettingZooPufferEnv(env)
+        # Add Pufferlib emulation wrapper
+        if not eval:
+            env = pufferlib.emulation.PettingZooPufferEnv(env)
+
         return env
 
     return env_creator

@@ -7,9 +7,9 @@ import copy
 from collections import defaultdict
 from reinforcement_learning import environment
 from syllabus.task_space import DiscreteTaskSpace
-from syllabus.core.evaluator import CleanRLDiscreteEvaluator, Evaluator
+from syllabus.core.evaluator import CleanRLEvaluator, Evaluator
 from syllabus.core.task_interface import PettingZooTaskWrapper
-from syllabus.curricula import SequentialCurriculum, PrioritizedLevelReplay, CentralizedPrioritizedLevelReplay, DomainRandomization
+from syllabus.curricula import SequentialCurriculum, PrioritizedLevelReplay, CentralPrioritizedLevelReplay, DomainRandomization, Learnability, LearningProgress
 from syllabus.core import MultiagentSharedCurriculumWrapper, make_multiprocessing_curriculum
 from nmmo.task.task_api import OngoingTask
 from nmmo.task.base_predicates import StayAlive
@@ -19,7 +19,22 @@ from nmmo.systems import item as i
 from nmmo.task import base_predicates as bp
 from nmmo.lib.material import Harvestable
 import gymnasium as gym
-from pufferlib.extensions import flatten
+from pufferlib.extensions import flatten, unflatten
+from pufferlib.emulation import split
+
+from vecenv import PettingZooAsyncVectorEnv
+
+
+def unpack_action(actions, agents, flat_action_space, action_size, flat_action_structure):
+    # Unpack actions from multidiscrete into the original action space
+    unpacked_actions = {}
+    for agent, atn in actions.items():
+        if agent in agents:
+            unpacked_actions[agent] = unflatten(
+                split(atn, flat_action_space, action_size, batched=False),
+                flat_action_structure
+            )
+    return unpacked_actions
 
 
 def concatenate(flat_sample):
@@ -40,10 +55,14 @@ def pad_agent_data(data, agents, pad_value):
 
 
 class PufferEvaluator(Evaluator):
-    def __init__(self, agent, possible_agents, pad_obs, *args, **kwargs):
+    def __init__(self, agent, possible_agents, pad_obs, flat_action_space, action_size, flat_action_structure, *args, **kwargs):
         super().__init__(agent, *args, **kwargs)
         self.possible_agents = possible_agents
         self.pad_obs = pad_obs
+        self.flat_action_space = flat_action_space
+        self.action_size = action_size
+        self.flat_action_structure = flat_action_structure
+
         # Make cpu copy of model
         if agent is not None:
             self.set_agent(agent)
@@ -67,14 +86,25 @@ class PufferEvaluator(Evaluator):
         value = torch.reshape(value, (-1, len(self.possible_agents)))
         # Average over agents into n_envs x 1
         value = torch.mean(value, -1).unsqueeze(-1)
-        return value, {"lstm_state": lstm_state}
+        return value, lstm_state, {}
 
     def _get_action(self, state, lstm_state=None, done=None):
         self._check_inputs(lstm_state, done)
         action, _, _, _, lstm_state = self.agent.forward(
             state, lstm_state
         )
-        return action, {"lstm_state": lstm_state}
+        action = torch.reshape(action, (-1, len(self.possible_agents), 12))
+        action = [
+            unpack_action(
+                {i + 1: a.cpu().numpy() for i, a in enumerate(env_actions)},
+                np.arange(1, len(self.possible_agents) + 1),
+                self.flat_action_space,
+                self.action_size,
+                self.flat_action_structure
+            )
+            for env_actions in action
+        ]
+        return action, lstm_state, {}
 
     def _get_action_and_value(self, state, lstm_state=None, done=None):
         self._check_inputs(lstm_state, done)
@@ -86,7 +116,7 @@ class PufferEvaluator(Evaluator):
         # Average over agents into n_envs x 1
         value = torch.mean(value, -1).unsqueeze(-1)
 
-        return (action, value, {"lstm_state": lstm_state})
+        return (action, value, lstm_state, {})
 
     def _check_inputs(self, lstm_state, done):
         assert (
@@ -107,6 +137,20 @@ class PufferEvaluator(Evaluator):
         state = torch.Tensor(np.stack(new_state)).to(self.device)
         return state
 
+    def _prepare_lstm(self, lstm_state, done):
+        lstm_state = (
+            torch.Tensor(lstm_state[0]),
+            torch.Tensor(lstm_state[1]),
+        )
+        # done = torch.Tensor(done)
+        if self.device is not None:
+            lstm_state = (
+                lstm_state[0].to(self.device),
+                lstm_state[1].to(self.device),
+            )
+            # done = done.to(self.device)
+        return lstm_state, done
+
     def _set_eval_mode(self):
         self.agent.eval()
 
@@ -118,32 +162,86 @@ def make_syllabus_env_creator(args, agent_module):
     sample_env_creator = environment.make_env_creator(
         reward_wrapper_cls=agent_module.RewardWrapper, syllabus_wrapper=True
     )
+    eval_env_creator = environment.make_env_creator(
+        reward_wrapper_cls=agent_module.RewardWrapper, syllabus_wrapper=True, eval=True
+    )
+
+    def make_env(* args, **kwargs):
+        def thunk():
+            env = eval_env_creator(*args, **kwargs)
+            env.metadata = None
+            return env
+        return thunk
+
     sample_env = sample_env_creator(env=args.env, reward_wrapper=args.reward_wrapper)
+    for agent in sample_env.possible_agents:
+        sample_env.action_space(agent)
     sample_obs, info = sample_env.reset()
 
     flat_observation = concatenate(flatten(sample_obs[sample_env.possible_agents[0]]))
     pad_obs = flat_observation * 0
-    task_space = SyllabusSeedWrapper.task_space
+    task_space = SyllabusMapWrapper.task_space
     # curriculum = create_sequential_curriculum(task_space)
     # evaluator = PufferEvaluator(None, sample_env.possible_agents, pad_obs, device=args.train.device)
-    curriculum = CentralizedPrioritizedLevelReplay(
-        task_space,
-        # sample_env.observation_space,
-        num_steps=args.train.batch_rows,
-        # num_processes=args.train.num_envs,
-        num_processes=args.train.num_envs * args.env.num_agents,
-        # num_minibatches=2,
-        # buffer_size=128,
-        gamma=args.train.gamma,
-        gae_lambda=args.train.gae_lambda,
-        task_sampler_kwargs_dict={"strategy": "value_l1", "temperature": 0.3, "staleness_coef": 0.3, "alpha": 0.25},
-        # evaluator=evaluator,
-        # lstm_size=args.recurrent.input_size,
-        record_stats=True,
-    )
+    if args.syllabus.method == "centralplr":
+        curriculum = CentralPrioritizedLevelReplay(
+            task_space,
+            # sample_env.observation_space,
+            num_steps=args.train.batch_rows,
+            # num_processes=args.train.num_envs,
+            num_processes=args.train.num_envs * args.env.num_agents,
+            # num_minibatches=2,
+            # buffer_size=128,
+            gamma=args.train.gamma,
+            gae_lambda=args.train.gae_lambda,
+            task_sampler_kwargs_dict={"strategy": "value_l1", "temperature": 0.3, "staleness_coef": 0.3, "alpha": 0.25},
+            # evaluator=evaluator,
+            # lstm_size=args.recurrent.input_size,
+            record_stats=True,
+        )
+    elif args.syllabus.method == "learning_progress":
+        evaluator = PufferEvaluator(
+            None,
+            sample_env.possible_agents,
+            pad_obs,
+            sample_env.flat_action_space,
+            sample_env.atn_sz,
+            sample_env.flat_action_structure,
+            device=args.train.device
+        )
+        eval_envs = PettingZooAsyncVectorEnv(
+            [make_env(env=args.env, reward_wrapper=args.reward_wrapper) for _ in range(args.train.num_envs)]
+        )
+        curriculum = LearningProgress(
+            task_space,
+            eval_envs=eval_envs,
+            evaluator=evaluator,
+            eval_interval_steps=50 * args.train.batch_size,
+            eval_eps=1 * 256,
+            recurrent_size=args.recurrent.input_size,
+            recurrent_method="lstm",
+            continuous_progress=True,
+            normalize_success=False,
+            multiagent=True)
+    elif args.syllabus.method == "learnability":
+        evaluator = PufferEvaluator(None, sample_env.possible_agents, pad_obs, device=args.train.device)
+        eval_envs = gym.vector.AsyncVectorEnv(
+            [make_env(env=args.env, reward_wrapper=args.reward_wrapper) for _ in range(args.num_envs)]
+        )
+        curriculum = Learnability(
+            task_space,
+            eval_envs=eval_envs,
+            evaluator=evaluator,
+            eval_interval_steps=25 * args.train.batch_size,
+            eval_eps=1 * 200,
+            continuous_progress=True,
+            normalize_success=args.normalize_success_rates)
+    elif args.syllabus.method == "domain_randomization":
+        curriculum = DomainRandomization(task_space)
     # curriculum = DomainRandomization(task_space)
-    curriculum = MultiagentSharedCurriculumWrapper(curriculum, sample_env.possible_agents, joint_policy=True)
-    curriculum = make_multiprocessing_curriculum(curriculum, start=False)
+    curriculum = MultiagentSharedCurriculumWrapper(
+        curriculum, sample_env.possible_agents, joint_policy=True)
+    curriculum = make_multiprocessing_curriculum(curriculum, start=False, timeout=3000)
 
     return curriculum, environment.make_env_creator(
         reward_wrapper_cls=agent_module.RewardWrapper, syllabus=curriculum
@@ -194,28 +292,91 @@ class SyllabusSeedWrapper(PettingZooTaskWrapper):
 
     task_space = DiscreteTaskSpace(200)
 
-    def __init__(self, env: gym.Env):
+    def __init__(self, env: gym.Env, eval=False):
         super().__init__(env)
         self.env = env
+        self.eval = eval
+        self.task = None
 
         self.task_space = SyllabusSeedWrapper.task_space
         self.change_task(self.task_space.sample())
-        self._task_index = None
-        self.task_fn = None
+        self.mean_episode_return = 0.0
 
     def reset(self, **kwargs):
+        self.mean_episode_return = 0.0
         seed = kwargs.pop("seed", None)
         new_task = kwargs.pop("new_task", seed)
-        obs, info = super().reset(new_task=new_task, **kwargs)
+        if new_task is not None:
+            self.change_task(new_task)
+            self.task = new_task
+        obs, info = self.env.reset(**kwargs)
+        if self.eval:
+            info["task_completion"] = 0.0
+            info["task"] = self.task
         return self.observation(obs), info
 
     def change_task(self, new_task):
         self.env.seed(int(new_task))
         self.task = new_task
 
+    def _task_completion(self, obs, rew, term, trunc, info):
+        return self.mean_episode_return
+
     def step(self, action):
-        obs, rew, terms, truncs, info = super().step(action)
-        return self.observation(obs), rew, terms, truncs, info
+        obs, rew, term, trunc, info = self.env.step(action)
+        # Determine completion status of the current task
+        self.mean_episode_return += sum(rew.values()) / len(rew)
+        if self.eval:
+            self.task_completion = self._task_completion(obs, rew, term, trunc, info)
+            info["task_completion"] = self.task_completion
+            info["task"] = self.task
+        return self.observation(obs), rew, term, trunc, info
+
+    def action_space(self, agent):
+        """Implement Neural MMO's action_space method."""
+        return self.env.action_space(agent)
+
+
+class SyllabusMapWrapper(PettingZooTaskWrapper):
+    """
+    Wrapper to handle tasks for the Neural MMO environment.
+    """
+
+    task_space = DiscreteTaskSpace(256)
+
+    def __init__(self, env: gym.Env, eval=False):
+        super().__init__(env)
+        self.env = env
+        self.eval = eval
+        self.task = None
+
+        self.task_space = SyllabusMapWrapper.task_space
+        self.mean_episode_return = 0.0
+
+    def reset(self, **kwargs):
+        self.mean_episode_return = 0.0
+        seed = kwargs.pop("seed", None)
+        new_task = kwargs.pop("new_task", seed)
+        # new_task = 21
+        self.task = new_task
+        # print(new_task)
+        obs, info = self.env.reset(map_id=new_task, **kwargs)
+        if self.eval:
+            info["task_completion"] = 0.0
+            info["task"] = self.task
+        return self.observation(obs), info
+
+    def _task_completion(self, obs, rew, term, trunc, info):
+        return min(max(self.mean_episode_return, 0.0), 1.0)
+
+    def step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+        # Determine completion status of the current task
+        self.mean_episode_return += sum(rew.values()) / len(rew)
+        if self.eval:
+            info["task_completion"] = self._task_completion(obs, rew, term, trunc, info)
+            info["task"] = self.task
+        return self.observation(obs), rew, term, trunc, info
 
     def action_space(self, agent):
         """Implement Neural MMO's action_space method."""

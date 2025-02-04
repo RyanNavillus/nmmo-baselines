@@ -67,7 +67,7 @@ def train(args, env_creator, agent_creator, agent_module, syllabus=None):
     )
 
     if syllabus is not None:
-        if isinstance(syllabus.curriculum, PrioritizedLevelReplay):
+        if hasattr(syllabus.curriculum.curriculum, "evaluator"):
             syllabus.curriculum.curriculum.evaluator.set_agent(data.agent)
         syllabus.start()
 

@@ -22,7 +22,7 @@ import pufferlib.emulation
 import pufferlib.vectorization
 import pufferlib.frameworks.cleanrl
 import pufferlib.policy_pool
-from syllabus.curricula import CentralizedPrioritizedLevelReplay
+from syllabus.curricula import CentralPrioritizedLevelReplay
 SKIP_LOG_KEYS = ["curriculum/Task_", "env_id"]
 
 
@@ -316,7 +316,7 @@ def evaluate(data):
                     next_lstm_state[0][:, env_id],
                     next_lstm_state[1][:, env_id],
                 )
-
+            
             actions, logprob, value, next_lstm_state = data.policy_pool.forwards(
                 o.to(data.device), next_lstm_state
             )
@@ -329,7 +329,7 @@ def evaluate(data):
             value = value.flatten()
 
             # Syllabus curriculum update
-            if data.curriculum is not None and isinstance(data.curriculum.curriculum.curriculum, CentralizedPrioritizedLevelReplay) and data.prev_value is not None:
+            if data.curriculum is not None and isinstance(data.curriculum.curriculum.curriculum, CentralPrioritizedLevelReplay) and data.prev_value is not None:
                 tasks = [info["task_id"] for info in i["learner"]]
                 env_ids = [info["env_id"] for info in i["learner"]]
 
