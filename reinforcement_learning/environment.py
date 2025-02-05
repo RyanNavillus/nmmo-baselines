@@ -62,7 +62,7 @@ def make_env_creator(
 
         # Add eval wrapper
         if eval:
-            env = GymnasiumEvaluationWrapper(env, start_index_spacing=15, randomize_order=False)
+            env = GymnasiumEvaluationWrapper(env, start_index_spacing=17, randomize_order=False)
 
         # Use syllabus curriculum if provided
         if syllabus is not None:
