@@ -241,7 +241,7 @@ def make_syllabus_env_creator(args, agent_module):
     # curriculum = DomainRandomization(task_space)
     curriculum = MultiagentSharedCurriculumWrapper(
         curriculum, sample_env.possible_agents, joint_policy=True)
-    curriculum = make_multiprocessing_curriculum(curriculum, start=False, timeout=3000)
+    curriculum = make_multiprocessing_curriculum(curriculum, start=False, timeout=6000)
 
     return curriculum, environment.make_env_creator(
         reward_wrapper_cls=agent_module.RewardWrapper, syllabus=curriculum
