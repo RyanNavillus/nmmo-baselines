@@ -217,7 +217,7 @@ def make_syllabus_env_creator(args, agent_module):
             eval_envs=eval_envs,
             evaluator=evaluator,
             eval_interval_steps=50 * args.train.batch_size,
-            eval_eps=1 * 256 + 32,
+            eval_eps=384,
             recurrent_size=args.recurrent.input_size,
             recurrent_method="lstm",
             continuous_progress=True,
