@@ -370,7 +370,8 @@ def evaluate(data):
             for policy_name, policy_i in i.items():
                 for agent_i in policy_i:
                     for name, dat in unroll_nested_dict(agent_i):
-                        infos[policy_name][name].append(dat)
+                        if isinstance(name, int):
+                            infos[policy_name][name].append(dat)
 
         with env_profiler:
             data.pool.send(actions)

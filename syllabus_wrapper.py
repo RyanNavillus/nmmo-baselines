@@ -359,9 +359,11 @@ class SyllabusMapWrapper(PettingZooTaskWrapper):
         new_task = kwargs.pop("new_task", seed)
         self.task = new_task
         obs, info = self.env.reset(map_id=new_task, **kwargs)
-        if self.eval:
-            info["task_completion"] = 0.0
-            info["task"] = self.task
+        for agent in self.env.possible_agents:
+            info[agent]["task_id"] = self.task
+        info["task_completion"] = 0.0
+        info["task"] = self.task
+
         return self.observation(obs), info
 
     def _task_completion(self, obs, rew, term, trunc, info):
@@ -371,9 +373,12 @@ class SyllabusMapWrapper(PettingZooTaskWrapper):
         obs, rew, term, trunc, info = self.env.step(action)
         # Determine completion status of the current task
         self.mean_episode_return += sum(rew.values()) / len(rew)
-        if self.eval:
-            info["task_completion"] = self._task_completion(obs, rew, term, trunc, info)
-            info["task"] = self.task
+        for agent in self.env.possible_agents:
+            if agent not in info:
+                info[agent] = {}
+            info[agent]["task_id"] = self.task
+        info["task_completion"] = self._task_completion(obs, rew, term, trunc, info)
+        info["task"] = self.task
         return self.observation(obs), rew, term, trunc, info
 
     def action_space(self, agent):

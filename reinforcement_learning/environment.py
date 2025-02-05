@@ -70,7 +70,7 @@ def make_env_creator(
                 env,
                 env.task_space,
                 syllabus.components,
-                batch_size=8,
+                batch_size=64,
             )
 
         # Add Pufferlib emulation wrapper
