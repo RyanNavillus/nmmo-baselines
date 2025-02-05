@@ -194,7 +194,7 @@ def make_syllabus_env_creator(args, agent_module):
             # buffer_size=128,
             gamma=args.train.gamma,
             gae_lambda=args.train.gae_lambda,
-            task_sampler_kwargs_dict={"strategy": "value_l1", "temperature": 0.3, "staleness_coef": 0.3, "alpha": 0.25},
+            task_sampler_kwargs_dict={"strategy": "value_l1"},
             # evaluator=evaluator,
             # lstm_size=args.recurrent.input_size,
             record_stats=True,
