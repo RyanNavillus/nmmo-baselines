@@ -47,6 +47,9 @@ train:
   compile: False
   compile_mode: reduce-overhead
 
+  eval_interval: 16
+  eval_episodes: 32
+
 sweep:
   method: random
   name: sweep

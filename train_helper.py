@@ -73,13 +73,15 @@ def train(args, env_creator, agent_creator, agent_module, syllabus=None):
 
     eval_args = copy.deepcopy(args)
     eval_data, env_outputs = setup_eval(eval_args, data.agent)
+    eval_iter = 0
 
     while not clean_pufferl.done_training(data):
         clean_pufferl.evaluate(data)
 
         # Evaluate on test seeds
-        print("Evaluating")
-        env_outputs = evaluate_agent(args, eval_data, env_outputs, data.wandb, data.global_step)
+        if eval_iter == 0:
+            env_outputs = evaluate_agent(args, eval_data, env_outputs, data.wandb, data.global_step)
+        eval_iter = (eval_iter + 1) % (args.train.eval_interval)
 
         if syllabus is not None:
             syllabus.log_metrics(data.wandb, [], step=data.global_step)
@@ -144,11 +146,13 @@ def setup_eval(args, agent):
 
 def evaluate_agent(args, data, env_outputs, train_wandb, global_step):
     o, r, d, t, i, env_id, mask = env_outputs
+    print("Evaluating")
 
     # Evaluate agent
     eval_returns = []
     ep_returns = torch.zeros(8 * args.env.num_agents)
-    while len(eval_returns) <= 8 * args.env.num_agents:
+    start = time.time()
+    while len(eval_returns) <= args.train.eval_episodes * args.env.num_agents:
         with torch.no_grad():
             o = torch.as_tensor(o)
             r = torch.as_tensor(r).float().to(data.device).view(-1)
@@ -208,7 +212,8 @@ def evaluate_agent(args, data, env_outputs, train_wandb, global_step):
             "eval/return": np.mean(eval_returns),
             **{f"{k}": v for k, v in data.stats.items()}
         })
-
+    end = time.time()
+    print(f"Evaluation took {end - start:.2f} seconds")
     return env_outputs
 
 
