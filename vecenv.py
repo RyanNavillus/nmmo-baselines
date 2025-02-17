@@ -183,3 +183,113 @@ class PettingZooAsyncVectorEnv:
                 pass  # In case the remote is already closed.
         for p in self.processes:
             p.join()
+
+
+class PettingZooSyncVectorEnv:
+    """
+    A synchronous vectorized wrapper for PettingZoo environments.
+
+    Each environment is created and stepped synchronously in the same process.
+
+    Example:
+        from pettingzoo.butterfly import pistonball_v4
+
+        def make_env():
+            return pistonball_v4.env()
+
+        # Create a list of environment constructor functions.
+        env_fns = [make_env for _ in range(4)]
+        vec_env = PettingZooSyncVectorEnv(env_fns)
+
+        # Reset all environments.
+        observations, infos = vec_env.reset()
+
+        # Compute actions for each environment (each is a dict mapping agent names to actions).
+        actions = []
+        for obs in observations:
+            act = {agent: my_policy(obs[agent]) for agent in vec_env.agents}
+            actions.append(act)
+
+        # Synchronously step all environments.
+        obs, rewards, terms, truncs, infos = vec_env.step(actions)
+
+        # (Optionally) render the first environment.
+        vec_env.render(mode='human')
+
+        # Close all environments.
+        vec_env.close()
+    """
+
+    def __init__(self, env_fns):
+        """
+        Args:
+            env_fns (list of callables): A list of functions, each returning a new PettingZoo environment.
+        """
+        # Create all environments synchronously.
+        self.envs = [env_fn() for env_fn in env_fns]
+        self.num_envs = len(self.envs)
+        # To retrieve the agent names (assumed to be the same across environments),
+        # we perform a synchronous reset on the first environment.
+        observations, infos = self.reset()
+        self.agents = list(observations[0].keys())
+
+    def reset(self):
+        """
+        Resets all environments synchronously.
+
+        Returns:
+            observations (list): A list of observation dicts, one per environment.
+            infos (list): A list of info dicts, one per environment.
+        """
+        observations, infos = [], []
+        for env in self.envs:
+            obs, info = env.reset()
+            observations.append(obs)
+            infos.append(info)
+        return observations, infos
+
+    def step(self, actions):
+        """
+        Performs a synchronous step in each environment.
+
+        Args:
+            actions (list of dict): A list of action dictionaries, one per environment.
+                Each dictionary maps agent names to actions.
+
+        Returns:
+            tuple: A tuple containing five lists: (observations, rewards, terms, truncs, infos)
+                Each list has one element per environment.
+        """
+        all_obs, all_rewards = [], []
+        all_terms, all_truncs, all_infos = [], [], []
+        for env, action in zip(self.envs, actions):
+            obs, reward, term, trunc, info = env.step(action)
+            # Automatically reset the environment if all agents are done (terminated or truncated)
+            if all([a or b for a, b in zip(term.values(), trunc.values())]):
+                obs, _ = env.reset()
+            all_obs.append(obs)
+            all_rewards.append(reward)
+            all_terms.append(term)
+            all_truncs.append(trunc)
+            all_infos.append(info)
+        return all_obs, all_rewards, all_terms, all_truncs, all_infos
+
+    def render(self, mode='human'):
+        """
+        Renders the first environment.
+
+        Args:
+            mode (str): The mode to pass to the environment's render() method.
+
+        Returns:
+            The result of the environment's render() method.
+        """
+        return self.envs[0].render(mode=mode)
+
+    def close(self):
+        """
+        Closes all environments.
+        """
+        for env in self.envs:
+            if hasattr(env, "close"):
+                env.close()

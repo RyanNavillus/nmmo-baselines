@@ -81,7 +81,7 @@ env:
   max_episode_length: 1024
   maps_path: 'maps/train/'
   map_size: 128
-  num_maps: 256
+  num_maps: 128
   map_force_generation: False
   death_fog_tick: ~
   task_size: 2048

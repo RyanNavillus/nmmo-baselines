@@ -22,7 +22,7 @@ import gymnasium as gym
 from pufferlib.extensions import flatten, unflatten
 from pufferlib.emulation import split
 
-from vecenv import PettingZooAsyncVectorEnv
+from vecenv import PettingZooAsyncVectorEnv, PettingZooSyncVectorEnv
 
 
 def unpack_action(actions, agents, flat_action_space, action_size, flat_action_structure):
@@ -217,25 +217,36 @@ def make_syllabus_env_creator(args, agent_module):
             eval_envs=eval_envs,
             evaluator=evaluator,
             eval_interval_steps=50 * args.train.batch_size,
-            eval_eps=384,
+            eval_eps=192,
             recurrent_size=args.recurrent.input_size,
             recurrent_method="lstm",
             continuous_progress=True,
             normalize_success=False,
             multiagent=True)
     elif args.syllabus.method == "learnability":
-        evaluator = PufferEvaluator(None, sample_env.possible_agents, pad_obs, device=args.train.device)
-        eval_envs = gym.vector.AsyncVectorEnv(
-            [make_env(env=args.env, reward_wrapper=args.reward_wrapper) for _ in range(args.num_envs)]
+        evaluator = PufferEvaluator(
+            None,
+            sample_env.possible_agents,
+            pad_obs,
+            sample_env.flat_action_space,
+            sample_env.atn_sz,
+            sample_env.flat_action_structure,
+            device=args.train.device
+        )
+        eval_envs = PettingZooAsyncVectorEnv(
+            [make_env(env=args.env, reward_wrapper=args.reward_wrapper) for _ in range(args.train.num_envs)]
         )
         curriculum = Learnability(
             task_space,
             eval_envs=eval_envs,
             evaluator=evaluator,
-            eval_interval_steps=25 * args.train.batch_size,
-            eval_eps=1 * 200,
+            eval_interval_steps=50 * args.train.batch_size,
+            eval_eps=192,
+            recurrent_size=args.recurrent.input_size,
+            recurrent_method="lstm",
             continuous_progress=True,
-            normalize_success=args.normalize_success_rates)
+            normalize_success=False,
+            multiagent=True)
     elif args.syllabus.method == "domain_randomization":
         curriculum = DomainRandomization(task_space)
     # curriculum = DomainRandomization(task_space)
@@ -342,7 +353,7 @@ class SyllabusMapWrapper(PettingZooTaskWrapper):
     Wrapper to handle tasks for the Neural MMO environment.
     """
 
-    task_space = DiscreteTaskSpace(256)
+    task_space = DiscreteTaskSpace(128)
 
     def __init__(self, env: gym.Env, eval=False):
         super().__init__(env)
@@ -367,7 +378,7 @@ class SyllabusMapWrapper(PettingZooTaskWrapper):
         return self.observation(obs), info
 
     def _task_completion(self, obs, rew, term, trunc, info):
-        return max(self.mean_episode_return.values(), 0.0)
+        return max(max(self.mean_episode_return.values()), 0.0)
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
