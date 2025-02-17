@@ -164,3 +164,9 @@ hybrid:
 syllabus:
   use_curriculum: False
   method: "learning_progress"
+  ema_alpha: 0.1
+  p_theta: 0.1
+  top_k: 10
+  learnable_prob: 0.5
+  temperature: 0.1
+  staleness_coef: 0.1

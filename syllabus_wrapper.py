@@ -222,7 +222,10 @@ def make_syllabus_env_creator(args, agent_module):
             recurrent_method="lstm",
             continuous_progress=True,
             normalize_success=False,
-            multiagent=True)
+            multiagent=True,
+            ema_alpha=args.syllabus.ema_alpha,
+            p_theta=args.syllabus.p_theta,
+        )
     elif args.syllabus.method == "learnability":
         evaluator = PufferEvaluator(
             None,
@@ -247,6 +250,9 @@ def make_syllabus_env_creator(args, agent_module):
             continuous_progress=True,
             normalize_success=False,
             multiagent=True)
+            top_k=args.syllabus.top_k,
+            learnable_prob=args.syllabus.learnable_prob,
+        )
     elif args.syllabus.method == "domain_randomization":
         curriculum = DomainRandomization(task_space)
     # curriculum = DomainRandomization(task_space)
@@ -378,7 +384,7 @@ class SyllabusMapWrapper(PettingZooTaskWrapper):
         return self.observation(obs), info
 
     def _task_completion(self, obs, rew, term, trunc, info):
-        return max(max(self.mean_episode_return.values()), 0.0)
+        return min(max(max(self.mean_episode_return.values()) / 10.0, 0.0), 1.0)
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
